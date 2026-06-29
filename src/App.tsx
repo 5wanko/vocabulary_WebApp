@@ -912,19 +912,19 @@ export default function App() {
                     placeholder="単語 (例: run)"
                     value={newWord}
                     onChange={(e) => setNewWord(e.target.value)}
-                    className="flex-1 h-8 px-2 bg-white border border-[#E5E0D5] rounded-md text-xs font-bold" 
+                    className="flex-1 min-w-0 h-8 px-2 bg-white border border-[#E5E0D5] rounded-md text-xs font-bold" 
                   />
                   <input 
                     type="text" 
                     placeholder="意味 (例: 走る)"
                     value={newMeaning}
                     onChange={(e) => setNewMeaning(e.target.value)}
-                    className="flex-1 h-8 px-2 bg-white border border-[#E5E0D5] rounded-md text-xs" 
+                    className="flex-1 min-w-0 h-8 px-2 bg-white border border-[#E5E0D5] rounded-md text-xs" 
                   />
                   <button 
                     disabled={!newWord.trim() || !newMeaning.trim()}
                     onClick={handleAddWord}
-                    className="text-[#4CD964] disabled:opacity-40"
+                    className="shrink-0 text-[#4CD964] disabled:opacity-40"
                   >
                     <PlusCircle size={24} />
                   </button>
