@@ -253,30 +253,55 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !selectedDeck) return;
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const parsed = results.data as any[];
-        const newItems: VocabItem[] = parsed.map(row => {
-          // Normalize column names
-          const word = (row.word || row['単語'] || '').trim();
-          const meaning = (row.meaning || row['意味'] || '').trim();
-          if (!word || !meaning) return null;
+    const isHeaderRow = (row: string[]) => {
+      if (row.length < 2) return false;
+      const col1 = (row[0] || '').toLowerCase().trim();
+      const col2 = (row[1] || '').toLowerCase().trim();
+      
+      const headerKeysCol1 = ['word', '単語', 'vocab', 'term', 'english', '英語', 'english word'];
+      const headerKeysCol2 = ['meaning', '意味', 'definition', 'translation', 'japanese', '日本語'];
+      
+      return headerKeysCol1.includes(col1) || headerKeysCol2.includes(col2);
+    };
 
-          return {
+    Papa.parse(file, {
+      header: false,
+      skipEmptyLines: 'greedy',
+      complete: async (results) => {
+        const rawRows = results.data as string[][];
+        if (rawRows.length === 0) {
+          alert('CSVファイルの中にデータが見つかりませんでした。');
+          return;
+        }
+
+        let startIndex = 0;
+        // Check if the first row is a header row
+        if (rawRows.length > 0 && isHeaderRow(rawRows[0])) {
+          startIndex = 1;
+        }
+
+        const newItems: VocabItem[] = [];
+        for (let i = startIndex; i < rawRows.length; i++) {
+          const row = rawRows[i];
+          if (!row || row.length < 2) continue;
+
+          const word = (row[0] || '').trim();
+          const meaning = (row[1] || '').trim();
+          if (!word || !meaning) continue;
+
+          newItems.push({
             id: Math.random().toString(36).substring(2, 9),
             word,
             meaning,
-            distractor1: (row.distractor1 || row['間違い選択肢1'] || '').trim() || undefined,
-            distractor2: (row.distractor2 || row['間違い選択肢2'] || '').trim() || undefined,
-            distractor3: (row.distractor3 || row['間違い選択肢3'] || '').trim() || undefined,
+            distractor1: (row[2] || '').trim() || undefined,
+            distractor2: (row[3] || '').trim() || undefined,
+            distractor3: (row[4] || '').trim() || undefined,
             incorrectCount: 0
-          };
-        }).filter(Boolean) as VocabItem[];
+          });
+        }
 
         if (newItems.length === 0) {
-          alert('CSVファイルから有効な単語が検出されませんでした。1行目が word,meaning 等のヘッダーになっていることを確認してください。');
+          alert('CSVファイルから有効な単語が検出されませんでした。1列目に単語、2列目に意味が記載されていることを確認してください。');
           return;
         }
 
