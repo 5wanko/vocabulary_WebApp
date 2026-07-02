@@ -25,7 +25,8 @@ import type {
   QuizAnswer, 
   Option, 
   AppScreen,
-  OptionStatus
+  OptionStatus,
+  ByNumberSubMode
 } from './types';
 import { 
   loadDecksFromDB, 
@@ -47,9 +48,10 @@ export default function App() {
   // Configurations State
   const [quizMode, setQuizMode] = useState<QuizMode>('multipleChoice');
   const [rangeMode, setRangeMode] = useState<RangeMode>('byNumber');
-  const [rangeStart, setRangeStart] = useState<number>(1);
-  const [rangeEnd, setRangeEnd] = useState<number>(20);
-  const [randomQuestionCount, setRandomQuestionCount] = useState<number>(20);
+  const [byNumberSubMode, setByNumberSubMode] = useState<ByNumberSubMode>('range');
+  const [rangeStart, setRangeStart] = useState<number | ''>(1);
+  const [rangeEnd, setRangeEnd] = useState<number | ''>(20);
+  const [randomQuestionCount, setRandomQuestionCount] = useState<number | ''>(20);
   const [isShuffle, setIsShuffle] = useState<boolean>(true);
   const [isTimerEnabled, setIsTimerEnabled] = useState<boolean>(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(true);
@@ -110,6 +112,7 @@ export default function App() {
     if (selectedDeck) {
       setRangeStart(1);
       setRangeEnd(Math.max(1, Math.min(20, selectedDeck.vocabList.length)));
+      setRandomQuestionCount(Math.max(1, Math.min(20, selectedDeck.vocabList.length)));
     }
   }, [selectedDeckId]);
 
@@ -189,6 +192,7 @@ export default function App() {
     setNewWord('');
     setNewMeaning('');
     setRangeEnd(updatedDeck.vocabList.length);
+    setRandomQuestionCount(updatedDeck.vocabList.length);
     await loadDecks();
   };
 
@@ -202,8 +206,8 @@ export default function App() {
     };
 
     await saveDeckToDB(updatedDeck);
-    setRangeStart(Math.max(1, Math.min(rangeStart, updatedList.length)));
-    setRangeEnd(Math.max(1, Math.min(rangeEnd, updatedList.length)));
+    setRangeStart(typeof rangeStart === 'number' ? Math.max(1, Math.min(rangeStart, updatedList.length)) : '');
+    setRangeEnd(typeof rangeEnd === 'number' ? Math.max(1, Math.min(rangeEnd, updatedList.length)) : '');
     await loadDecks();
   };
 
@@ -313,6 +317,7 @@ export default function App() {
         await saveDeckToDB(updatedDeck);
         setRangeStart(1);
         setRangeEnd(updatedDeck.vocabList.length);
+        setRandomQuestionCount(updatedDeck.vocabList.length);
         await loadDecks();
         alert(`${newItems.length}語の単語を追加インポートしました！`);
       },
@@ -349,16 +354,21 @@ export default function App() {
     
     let sliced: VocabItem[] = [];
     if (rangeMode === 'byNumber') {
-      const startIdx = Math.max(0, rangeStart - 1);
-      const endIdx = Math.min(selectedDeck.vocabList.length, rangeEnd);
-      if (startIdx >= endIdx) return;
-      sliced = selectedDeck.vocabList.slice(startIdx, endIdx);
-      if (isShuffle) {
-        sliced = [...sliced].sort(() => Math.random() - 0.5);
+      if (byNumberSubMode === 'range') {
+        const start = typeof rangeStart === 'number' ? rangeStart : 1;
+        const end = typeof rangeEnd === 'number' ? rangeEnd : selectedDeck.vocabList.length;
+        const startIdx = Math.max(0, start - 1);
+        const endIdx = Math.min(selectedDeck.vocabList.length, end);
+        if (startIdx >= endIdx) return;
+        sliced = selectedDeck.vocabList.slice(startIdx, endIdx);
+        if (isShuffle) {
+          sliced = [...sliced].sort(() => Math.random() - 0.5);
+        }
+      } else {
+        const countValue = typeof randomQuestionCount === 'number' ? randomQuestionCount : 20;
+        const count = Math.min(selectedDeck.vocabList.length, Math.max(1, countValue));
+        sliced = [...selectedDeck.vocabList].sort(() => Math.random() - 0.5).slice(0, count);
       }
-    } else if (rangeMode === 'randomCount') {
-      const count = Math.min(selectedDeck.vocabList.length, Math.max(1, randomQuestionCount));
-      sliced = [...selectedDeck.vocabList].sort(() => Math.random() - 0.5).slice(0, count);
     } else { // incorrectOnly
       const failedWords = selectedDeck.vocabList.filter(w => w.incorrectCount > 0);
       sliced = [...failedWords];
@@ -755,12 +765,6 @@ export default function App() {
                     番号で指定
                   </button>
                   <button 
-                    onClick={() => setRangeMode('randomCount')}
-                    className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition ${rangeMode === 'randomCount' ? 'bg-[#FAF6EE] text-[#2C1F15] shadow-sm' : 'text-[#2C1F15]/60'}`}
-                  >
-                    ランダムに出題
-                  </button>
-                  <button 
                     onClick={() => setRangeMode('incorrectOnly')}
                     className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition ${rangeMode === 'incorrectOnly' ? 'bg-[#FAF6EE] text-[#2C1F15] shadow-sm' : 'text-[#2C1F15]/60'}`}
                   >
@@ -770,87 +774,95 @@ export default function App() {
 
                 {/* Range inputs details */}
                 {rangeMode === 'byNumber' && (
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center gap-2 justify-center">
-                      <input 
-                        type="number" 
-                        value={rangeStart}
-                        onChange={(e) => setRangeStart(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-16 h-9 text-center bg-white border border-[#E5E0D5] rounded-lg font-bold text-xs" 
-                      />
-                      <span className="text-xs text-gray-400">番 から</span>
-                      <span className="font-bold text-gray-400 mx-2">〜</span>
-                      <input 
-                        type="number" 
-                        value={rangeEnd}
-                        onChange={(e) => setRangeEnd(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-16 h-9 text-center bg-white border border-[#E5E0D5] rounded-lg font-bold text-xs" 
-                      />
-                      <span className="text-xs text-gray-400">番 まで</span>
+                  <div className="space-y-3 pt-2 bg-white rounded-xl p-3 border border-[#E5E0D5]">
+                    {/* Sub Mode Toggle */}
+                    <div className="flex gap-4 border-b border-[#E5E0D5] pb-3">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="byNumberMode"
+                          className="accent-[#00A2E8] w-4 h-4"
+                          checked={byNumberSubMode === 'range'}
+                          onChange={() => setByNumberSubMode('range')}
+                        />
+                        <span className="text-xs font-bold">範囲で指定</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="byNumberMode"
+                          className="accent-[#00A2E8] w-4 h-4"
+                          checked={byNumberSubMode === 'random'}
+                          onChange={() => setByNumberSubMode('random')}
+                        />
+                        <span className="text-xs font-bold">問題数でランダム</span>
+                      </label>
                     </div>
 
-                    <div className="flex justify-center gap-1.5">
-                      <button 
-                        onClick={() => { setRangeStart(1); setRangeEnd(Math.min(20, selectedDeck.vocabList.length)); }}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        1-20
-                      </button>
-                      <button 
-                        onClick={() => { setRangeStart(Math.min(21, selectedDeck.vocabList.length)); setRangeEnd(Math.min(40, selectedDeck.vocabList.length)); }}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        21-40
-                      </button>
-                      <button 
-                        onClick={() => { setRangeStart(1); setRangeEnd(selectedDeck.vocabList.length); }}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        全範囲
-                      </button>
-                    </div>
-                  </div>
-                )}
+                    {byNumberSubMode === 'range' && (
+                      <>
+                        <div className="flex items-center gap-2 justify-center pt-1">
+                          <input 
+                            type="number" 
+                            value={rangeStart}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setRangeStart(val === '' ? '' : Math.max(1, parseInt(val)));
+                            }}
+                            className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
+                          />
+                          <span className="text-xs text-gray-400">番 から</span>
+                          <span className="font-bold text-gray-400 mx-2">〜</span>
+                          <input 
+                            type="number" 
+                            value={rangeEnd}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setRangeEnd(val === '' ? '' : Math.max(1, parseInt(val)));
+                            }}
+                            className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
+                          />
+                          <span className="text-xs text-gray-400">番 まで</span>
+                        </div>
 
-                {rangeMode === 'randomCount' && (
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center gap-2 justify-center">
-                      <span className="text-xs text-gray-400">全単語から</span>
-                      <input 
-                        type="number" 
-                        value={randomQuestionCount}
-                        onChange={(e) => setRandomQuestionCount(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-16 h-9 text-center bg-white border border-[#E5E0D5] rounded-lg font-bold text-xs" 
-                      />
-                      <span className="text-xs text-gray-400">問を出題</span>
-                    </div>
+                        <div className="flex justify-center gap-1.5">
+                          <button 
+                            onClick={() => { setRangeStart(1); setRangeEnd(Math.min(20, selectedDeck.vocabList.length)); }}
+                            className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
+                          >
+                            1-20
+                          </button>
+                          <button 
+                            onClick={() => { setRangeStart(Math.min(21, selectedDeck.vocabList.length)); setRangeEnd(Math.min(40, selectedDeck.vocabList.length)); }}
+                            className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
+                          >
+                            21-40
+                          </button>
+                          <button 
+                            onClick={() => { setRangeStart(1); setRangeEnd(selectedDeck.vocabList.length); }}
+                            className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
+                          >
+                            すべて ({selectedDeck.vocabList.length})
+                          </button>
+                        </div>
+                      </>
+                    )}
 
-                    <div className="flex justify-center gap-1.5">
-                      <button 
-                        onClick={() => setRandomQuestionCount(10)}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        10問
-                      </button>
-                      <button 
-                        onClick={() => setRandomQuestionCount(20)}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        20問
-                      </button>
-                      <button 
-                        onClick={() => setRandomQuestionCount(50)}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        50問
-                      </button>
-                      <button 
-                        onClick={() => setRandomQuestionCount(selectedDeck.vocabList.length)}
-                        className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                      >
-                        全問
-                      </button>
-                    </div>
+                    {byNumberSubMode === 'random' && (
+                      <div className="flex items-center gap-2 justify-center pt-2 pb-1">
+                        <span className="text-xs font-bold text-gray-500">全体からランダムに</span>
+                        <input 
+                          type="number" 
+                          value={randomQuestionCount}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setRandomQuestionCount(val === '' ? '' : Math.max(1, parseInt(val)));
+                          }}
+                          className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
+                        />
+                        <span className="text-xs font-bold text-gray-500">問を出題</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1211,8 +1223,8 @@ export default function App() {
           <div className="text-center p-4 pt-6 shrink-0 border-b border-[#E5E0D5]/40">
             <h2 className="text-xl font-black">テスト結果</h2>
             <p className="text-[10px] font-bold text-gray-400 mt-1">
-              {rangeMode === 'byNumber' && `出題範囲: No. ${rangeStart} 〜 ${rangeEnd}`}
-              {rangeMode === 'randomCount' && `出題範囲: ランダム ${activeQuizList.length}問`}
+              {rangeMode === 'byNumber' && byNumberSubMode === 'range' && `出題範囲: No. ${rangeStart} 〜 ${rangeEnd}`}
+              {rangeMode === 'byNumber' && byNumberSubMode === 'random' && `出題範囲: ランダム ${activeQuizList.length}問`}
               {rangeMode === 'incorrectOnly' && `出題範囲: 苦手単語のみ ${activeQuizList.length}問`}
             </p>
           </div>
