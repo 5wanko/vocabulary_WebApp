@@ -25,8 +25,7 @@ import type {
   QuizAnswer, 
   Option, 
   AppScreen,
-  OptionStatus,
-  ByNumberSubMode
+  OptionStatus
 } from './types';
 import { 
   loadDecksFromDB, 
@@ -48,7 +47,6 @@ export default function App() {
   // Configurations State
   const [quizMode, setQuizMode] = useState<QuizMode>('multipleChoice');
   const [rangeMode, setRangeMode] = useState<RangeMode>('byNumber');
-  const [byNumberSubMode, setByNumberSubMode] = useState<ByNumberSubMode>('range');
   const [rangeStart, setRangeStart] = useState<number | ''>(1);
   const [rangeEnd, setRangeEnd] = useState<number | ''>(20);
   const [randomQuestionCount, setRandomQuestionCount] = useState<number | ''>(20);
@@ -89,6 +87,17 @@ export default function App() {
   useEffect(() => {
     // Load initial decks
     loadDecks();
+
+    // Request persistent storage if supported
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then((persisted) => {
+        if (persisted) {
+          console.log('Storage is persisted');
+        } else {
+          console.log('Storage is not persisted');
+        }
+      });
+    }
   }, []);
 
   const loadDecks = async () => {
@@ -248,6 +257,7 @@ export default function App() {
   // CSV UPLOAD & TEMPLATE DOWNLOAD
   // ==============================================
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   const handleCSVUploadClick = () => {
     fileInputRef.current?.click();
@@ -347,6 +357,65 @@ export default function App() {
   };
 
   // ==============================================
+  // JSON BACKUP & RESTORE
+  // ==============================================
+  const handleBackupData = () => {
+    const dataStr = JSON.stringify(decks, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
+    link.setAttribute('download', `vocab_decks_backup_${dateStr}.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleRestoreClick = () => {
+    restoreInputRef.current?.click();
+  };
+
+  const handleRestoreData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const importedDecks = JSON.parse(text);
+
+        if (!Array.isArray(importedDecks)) {
+          throw new Error('データ形式が正しくありません。配列である必要があります。');
+        }
+
+        for (const deck of importedDecks) {
+          if (!deck.id || !deck.name || !Array.isArray(deck.vocabList)) {
+            throw new Error('データ項目が不足しています。');
+          }
+        }
+
+        if (confirm(`インポートを実行しますか？\n現在登録されているすべての単語帳が、インポートするデータで上書きされます。\n(読み込み件数: ${importedDecks.length}件)`)) {
+          for (const d of decks) {
+            await deleteDeckFromDB(d.id);
+          }
+          for (const d of importedDecks) {
+            await saveDeckToDB(d);
+          }
+          await loadDecks();
+          alert('データの復元が完了しました！');
+        }
+      } catch (err: any) {
+        alert('復元に失敗しました。ファイルが正しくない可能性があります: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    if (restoreInputRef.current) restoreInputRef.current.value = '';
+  };
+
+  // ==============================================
   // QUIZ ENGINE LOGIC
   // ==============================================
   const startQuiz = () => {
@@ -354,21 +423,18 @@ export default function App() {
     
     let sliced: VocabItem[] = [];
     if (rangeMode === 'byNumber') {
-      if (byNumberSubMode === 'range') {
-        const start = typeof rangeStart === 'number' ? rangeStart : 1;
-        const end = typeof rangeEnd === 'number' ? rangeEnd : selectedDeck.vocabList.length;
-        const startIdx = Math.max(0, start - 1);
-        const endIdx = Math.min(selectedDeck.vocabList.length, end);
-        if (startIdx >= endIdx) return;
-        sliced = selectedDeck.vocabList.slice(startIdx, endIdx);
-        if (isShuffle) {
-          sliced = [...sliced].sort(() => Math.random() - 0.5);
-        }
-      } else {
-        const countValue = typeof randomQuestionCount === 'number' ? randomQuestionCount : 20;
-        const count = Math.min(selectedDeck.vocabList.length, Math.max(1, countValue));
-        sliced = [...selectedDeck.vocabList].sort(() => Math.random() - 0.5).slice(0, count);
-      }
+      const start = typeof rangeStart === 'number' ? rangeStart : 1;
+      const end = typeof rangeEnd === 'number' ? rangeEnd : selectedDeck.vocabList.length;
+      const startIdx = Math.max(0, start - 1);
+      const endIdx = Math.min(selectedDeck.vocabList.length, end);
+      if (startIdx >= endIdx) return;
+      sliced = selectedDeck.vocabList.slice(startIdx, endIdx);
+      
+      // Select random subset if randomQuestionCount is set
+      const countValue = typeof randomQuestionCount === 'number' ? randomQuestionCount : sliced.length;
+      const count = Math.min(sliced.length, Math.max(1, countValue));
+      
+      sliced = [...sliced].sort(() => Math.random() - 0.5).slice(0, count);
     } else { // incorrectOnly
       const failedWords = selectedDeck.vocabList.filter(w => w.incorrectCount > 0);
       sliced = [...failedWords];
@@ -638,9 +704,34 @@ export default function App() {
       {/* SCREEN 0: DECK LIST */}
       {currentScreen === 'deckList' && (
         <div className="flex flex-col flex-1 pb-20">
-          <div className="bg-[#00A2E8] p-5 pb-6 text-white shadow-md">
-            <h1 className="text-2xl font-black tracking-tight">単語帳 改</h1>
-            <p className="text-xs font-bold opacity-85 mt-1">単語帳のフォルダー管理</p>
+          <div className="bg-[#00A2E8] p-5 pb-6 text-white shadow-md flex justify-between items-start">
+            <div>
+              <h1 className="text-2xl font-black tracking-tight">単語帳 改</h1>
+              <p className="text-xs font-bold opacity-85 mt-1">単語帳のフォルダー管理</p>
+            </div>
+            <div className="flex gap-1.5 pt-1">
+              <button 
+                onClick={handleBackupData}
+                title="全データをバックアップ (JSON)"
+                className="p-2 hover:bg-white/10 active:scale-95 rounded-xl transition flex items-center justify-center text-white"
+              >
+                <Download size={18} />
+              </button>
+              <button 
+                onClick={handleRestoreClick}
+                title="データを復元 (JSON)"
+                className="p-2 hover:bg-white/10 active:scale-95 rounded-xl transition flex items-center justify-center text-white"
+              >
+                <Upload size={18} />
+              </button>
+              <input 
+                type="file"
+                ref={restoreInputRef}
+                onChange={handleRestoreData}
+                accept=".json"
+                className="hidden"
+              />
+            </div>
           </div>
           
           <div className="p-4 flex-1 overflow-y-auto space-y-4">
@@ -774,83 +865,64 @@ export default function App() {
 
                 {/* Range inputs details */}
                 {rangeMode === 'byNumber' && (
-                  <div className="space-y-3 pt-2 bg-white rounded-xl p-3 border border-[#E5E0D5]">
-                    {/* Sub Mode Toggle */}
-                    <div className="flex gap-4 border-b border-[#E5E0D5] pb-3">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                  <div className="space-y-4 pt-2 bg-white rounded-xl p-4 border border-[#E5E0D5]">
+                    
+                    {/* Range Selection */}
+                    <div>
+                      <div className="text-xs font-bold text-gray-500 mb-2">① 出題する範囲を指定</div>
+                      <div className="flex items-center gap-2 justify-center">
                         <input 
-                          type="radio" 
-                          name="byNumberMode"
-                          className="accent-[#00A2E8] w-4 h-4"
-                          checked={byNumberSubMode === 'range'}
-                          onChange={() => setByNumberSubMode('range')}
+                          type="number" 
+                          value={rangeStart}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setRangeStart(val === '' ? '' : Math.max(1, parseInt(val)));
+                          }}
+                          className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
                         />
-                        <span className="text-xs font-bold">範囲で指定</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                        <span className="text-xs text-gray-400">番 から</span>
+                        <span className="font-bold text-gray-400 mx-2">〜</span>
                         <input 
-                          type="radio" 
-                          name="byNumberMode"
-                          className="accent-[#00A2E8] w-4 h-4"
-                          checked={byNumberSubMode === 'random'}
-                          onChange={() => setByNumberSubMode('random')}
+                          type="number" 
+                          value={rangeEnd}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setRangeEnd(val === '' ? '' : Math.max(1, parseInt(val)));
+                          }}
+                          className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
                         />
-                        <span className="text-xs font-bold">問題数でランダム</span>
-                      </label>
+                        <span className="text-xs text-gray-400">番 まで</span>
+                      </div>
+
+                      <div className="flex justify-center gap-1.5 mt-3">
+                        <button 
+                          onClick={() => { setRangeStart(1); setRangeEnd(Math.min(20, selectedDeck.vocabList.length)); }}
+                          className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
+                        >
+                          1-20
+                        </button>
+                        <button 
+                          onClick={() => { setRangeStart(Math.min(21, selectedDeck.vocabList.length)); setRangeEnd(Math.min(40, selectedDeck.vocabList.length)); }}
+                          className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
+                        >
+                          21-40
+                        </button>
+                        <button 
+                          onClick={() => { setRangeStart(1); setRangeEnd(selectedDeck.vocabList.length); }}
+                          className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
+                        >
+                          すべて ({selectedDeck.vocabList.length})
+                        </button>
+                      </div>
                     </div>
 
-                    {byNumberSubMode === 'range' && (
-                      <>
-                        <div className="flex items-center gap-2 justify-center pt-1">
-                          <input 
-                            type="number" 
-                            value={rangeStart}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setRangeStart(val === '' ? '' : Math.max(1, parseInt(val)));
-                            }}
-                            className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
-                          />
-                          <span className="text-xs text-gray-400">番 から</span>
-                          <span className="font-bold text-gray-400 mx-2">〜</span>
-                          <input 
-                            type="number" 
-                            value={rangeEnd}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setRangeEnd(val === '' ? '' : Math.max(1, parseInt(val)));
-                            }}
-                            className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
-                          />
-                          <span className="text-xs text-gray-400">番 まで</span>
-                        </div>
+                    <div className="h-px bg-[#E5E0D5] w-full my-2" />
 
-                        <div className="flex justify-center gap-1.5">
-                          <button 
-                            onClick={() => { setRangeStart(1); setRangeEnd(Math.min(20, selectedDeck.vocabList.length)); }}
-                            className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                          >
-                            1-20
-                          </button>
-                          <button 
-                            onClick={() => { setRangeStart(Math.min(21, selectedDeck.vocabList.length)); setRangeEnd(Math.min(40, selectedDeck.vocabList.length)); }}
-                            className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                          >
-                            21-40
-                          </button>
-                          <button 
-                            onClick={() => { setRangeStart(1); setRangeEnd(selectedDeck.vocabList.length); }}
-                            className="bg-white border border-[#E5E0D5] hover:bg-gray-50 text-[10px] font-bold px-3 py-1 rounded-md"
-                          >
-                            すべて ({selectedDeck.vocabList.length})
-                          </button>
-                        </div>
-                      </>
-                    )}
-
-                    {byNumberSubMode === 'random' && (
-                      <div className="flex items-center gap-2 justify-center pt-2 pb-1">
-                        <span className="text-xs font-bold text-gray-500">全体からランダムに</span>
+                    {/* Question Count Selection */}
+                    <div>
+                      <div className="text-xs font-bold text-gray-500 mb-2">② 上記の範囲から何問出題するか</div>
+                      <div className="flex items-center gap-2 justify-center">
+                        <span className="text-xs text-gray-400">ランダムに</span>
                         <input 
                           type="number" 
                           value={randomQuestionCount}
@@ -860,9 +932,12 @@ export default function App() {
                           }}
                           className="w-16 h-9 text-center bg-gray-50 border border-[#E5E0D5] rounded-lg font-bold text-xs focus:outline-none focus:border-[#00A2E8] focus:ring-1 focus:ring-[#00A2E8]" 
                         />
-                        <span className="text-xs font-bold text-gray-500">問を出題</span>
+                        <span className="text-xs text-gray-400">問を出題</span>
                       </div>
-                    )}
+                      <div className="text-center mt-2">
+                        <span className="text-[10px] text-gray-400">※空欄の場合は指定範囲の全問を出題します</span>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -1223,8 +1298,7 @@ export default function App() {
           <div className="text-center p-4 pt-6 shrink-0 border-b border-[#E5E0D5]/40">
             <h2 className="text-xl font-black">テスト結果</h2>
             <p className="text-[10px] font-bold text-gray-400 mt-1">
-              {rangeMode === 'byNumber' && byNumberSubMode === 'range' && `出題範囲: No. ${rangeStart} 〜 ${rangeEnd}`}
-              {rangeMode === 'byNumber' && byNumberSubMode === 'random' && `出題範囲: ランダム ${activeQuizList.length}問`}
+              {rangeMode === 'byNumber' && `出題範囲: No. ${rangeStart}〜${rangeEnd}から${activeQuizList.length}問`}
               {rangeMode === 'incorrectOnly' && `出題範囲: 苦手単語のみ ${activeQuizList.length}問`}
             </p>
           </div>

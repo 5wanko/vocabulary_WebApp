@@ -18,8 +18,6 @@ export type QuizMode = 'multipleChoice' | 'flashcard';
 
 export type RangeMode = 'byNumber' | 'incorrectOnly';
 
-export type ByNumberSubMode = 'range' | 'random';
-
 export interface QuizAnswer {
   id: string;
   word: string;
